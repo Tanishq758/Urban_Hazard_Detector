@@ -1,13 +1,3 @@
----
-title: Urban Hazard Detector
-emoji: 🚧
-colorFrom: blue
-colorTo: red
-sdk: docker
-app_port: 7860
-pinned: false
----
-
 # Urban Hazard Detector
 
 "We don't just detect potholes — we tell you which one to fix first when you can only fix five this week."
