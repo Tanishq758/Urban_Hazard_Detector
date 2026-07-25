@@ -1,0 +1,1274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Urban Hazard Detector</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<style>
+  :root {
+    --bg: #0e1117;
+    --panel: #161b26;
+    --panel-border: #262d3d;
+    --text: #e6e9ef;
+    --muted: #8b93a7;
+    --accent: #4f8cff;
+    --green: #35c76e;
+    --yellow: #f2c94c;
+    --red: #eb5757;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  header {
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--panel-border);
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+  }
+  header h1 { font-size: 18px; margin: 0; }
+  header .tagline { color: var(--muted); font-size: 13px; }
+  .layout {
+    display: grid;
+    grid-template-columns: minmax(320px, 420px) 1fr;
+    gap: 16px;
+    padding: 16px;
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: 1fr; }
+  }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 12px;
+    padding: 16px;
+  }
+  .panel h2 {
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    margin: 0 0 12px 0;
+  }
+  #cameraWrap {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 4/3;
+    background: #000;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  #video, #snapshotCanvas {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  #snapshotCanvas { position: absolute; top: 0; left: 0; display: none; }
+  #cameraWrap.flash-success { box-shadow: 0 0 0 5px var(--green) inset; transition: box-shadow 0.15s ease; }
+  #cameraWrap.flash-fail { box-shadow: 0 0 0 5px #4a5064 inset; transition: box-shadow 0.15s ease; }
+  .detection-badge {
+    position: absolute;
+    top: 12px; left: 12px;
+    padding: 9px 16px;
+    border-radius: 20px;
+    font-weight: 700;
+    font-size: 14px;
+    display: none;
+    align-items: center;
+    gap: 6px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.45);
+    z-index: 5;
+    animation: badge-pop 0.25s ease;
+  }
+  .detection-badge.success { background: var(--green); color: #06210f; }
+  .detection-badge.fail { background: #2a3247; color: var(--text); border: 1px solid var(--panel-border); }
+  @keyframes badge-pop {
+    from { transform: scale(0.85); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+  }
+  .btn-row { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  button {
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 13px;
+    cursor: pointer;
+    font-weight: 600;
+  }
+  button.secondary { background: #2a3247; color: var(--text); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  button:hover:not(:disabled) { filter: brightness(1.1); }
+  input[type=file] { display: none; }
+  .status-line {
+    margin-top: 10px;
+    font-size: 13px;
+    color: var(--muted);
+    min-height: 18px;
+  }
+  .result-card {
+    margin-top: 12px;
+    padding: 12px;
+    border-radius: 8px;
+    background: #1c2231;
+    border: 1px solid var(--panel-border);
+    border-left: 4px solid var(--panel-border);
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  .result-card.success { border-left-color: var(--green); }
+  .result-card.fail { border-left-color: #4a5064; color: var(--muted); }
+  .result-card .headline { font-size: 14px; font-weight: 700; color: var(--text); display: block; margin-bottom: 4px; }
+  .tier-dot {
+    display: inline-block;
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    margin-right: 6px;
+  }
+  .tier-low { background: var(--green); }
+  .tier-medium { background: var(--yellow); }
+  .tier-high { background: var(--red); }
+  #map { width: 100%; height: 360px; border-radius: 8px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--panel-border); }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; }
+  #priorityTable tbody tr { cursor: pointer; transition: background 0.15s ease; }
+  #priorityTable tbody tr:hover { background: #1c2231; }
+  #priorityTable tbody tr.active-row { background: #23304a; }
+  .row-hint { font-size: 11px; color: var(--muted); margin-top: 6px; }
+  .loc-row { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--muted); margin-top: 8px; flex-wrap: wrap; }
+  .loc-row code { background: #1c2231; padding: 2px 6px; border-radius: 4px; }
+  input[type=text], input[type=password] {
+    flex: 1;
+    min-width: 160px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--panel-border);
+    background: #0e1117;
+    color: var(--text);
+    font-size: 13px;
+  }
+  input[type=text]::placeholder, input[type=password]::placeholder { color: var(--muted); }
+  .admin-area { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+  .admin-area input[type=password] { width: 140px; min-width: 0; padding: 7px 10px; font-size: 12px; }
+  .admin-btn { padding: 7px 10px; font-size: 12px; }
+  .route-hazard-item {
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: #1c2231;
+    margin-top: 8px;
+    font-size: 13px;
+    cursor: pointer;
+    border-left: 4px solid var(--panel-border);
+  }
+  .route-hazard-item:hover { background: #23304a; }
+  .suggestions-dropdown {
+    display: none;
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    background: #1c2231;
+    border: 1px solid var(--panel-border);
+    border-radius: 8px;
+    max-height: 220px;
+    overflow-y: auto;
+    z-index: 50;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.4);
+  }
+  .suggestion-item {
+    padding: 8px 10px;
+    font-size: 13px;
+    cursor: pointer;
+    border-bottom: 1px solid var(--panel-border);
+  }
+  .suggestion-item:last-child { border-bottom: none; }
+  .suggestion-item:hover { background: #23304a; }
+  /* hazard pin: a proper map-pin teardrop instead of a flat dot, colored by
+     severity tier, with a "!" mark and a small count badge for multi-pothole photos */
+  .pothole-pin {
+    border: 2px solid #fff;
+    border-radius: 50% 50% 50% 0;
+    transform: rotate(-45deg);
+    box-shadow: 0 3px 8px rgba(0,0,0,0.5);
+    position: relative;
+  }
+  .pothole-pin-mark {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%) rotate(45deg);
+    color: #fff;
+    font-weight: 800;
+    line-height: 1;
+  }
+  .pothole-pin-badge {
+    position: absolute;
+    top: -8px; right: -10px;
+    transform: rotate(45deg);
+    background: #1c2231;
+    color: #fff;
+    border-radius: 50%;
+    min-width: 16px; height: 16px;
+    font-size: 10px;
+    display: flex; align-items: center; justify-content: center;
+    border: 1px solid rgba(255,255,255,0.7);
+    padding: 0 2px;
+  }
+  /* live position ("you are here") marker: blue puck + directional arrow +
+     pulsing halo, deliberately a different shape from the pothole pins above
+     so the two are never confused on the map */
+  .nav-marker-wrap { position: relative; width: 36px; height: 36px; }
+  .nav-marker-pulse {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    background: rgba(79,140,255,0.35);
+    animation: nav-pulse 1.8s ease-out infinite;
+  }
+  @keyframes nav-pulse {
+    0% { transform: scale(0.5); opacity: 0.9; }
+    100% { transform: scale(2); opacity: 0; }
+  }
+  .nav-marker-dot {
+    position: absolute;
+    top: 50%; left: 50%;
+    width: 22px; height: 22px;
+    margin: -11px 0 0 -11px;
+    background: var(--accent);
+    border: 3px solid #fff;
+    border-radius: 50%;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .nav-marker-arrow { color: #fff; font-size: 11px; line-height: 1; }
+  #toast {
+    position: fixed;
+    top: 16px; right: 16px;
+    background: var(--red);
+    color: white;
+    padding: 14px 18px;
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 600;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    transform: translateX(140%);
+    transition: transform 0.35s ease;
+    z-index: 1000;
+    max-width: 320px;
+  }
+  #toast.show { transform: translateX(0); }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .modal-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.75);
+    z-index: 2000;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .modal-backdrop.show { display: flex; }
+  .modal-content {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 14px;
+    padding: 20px;
+    max-width: 640px;
+    width: 100%;
+    max-height: 90vh;
+    overflow-y: auto;
+    position: relative;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+    animation: badge-pop 0.2s ease;
+  }
+  .modal-close {
+    position: absolute;
+    top: 12px; right: 12px;
+    background: #2a3247;
+    color: var(--text);
+    border: none;
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    font-size: 15px;
+    cursor: pointer;
+    line-height: 1;
+  }
+  .modal-headline { font-size: 16px; font-weight: 700; margin: 0 24px 12px 0; }
+  .modal-headline.success { color: var(--green); }
+  .modal-headline.fail { color: var(--muted); }
+  .modal-canvas { width: 100%; max-height: 55vh; object-fit: contain; border-radius: 8px; background: #000; display: block; }
+  .modal-details { margin-top: 14px; font-size: 13px; line-height: 1.7; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🚧 Urban Hazard Detector</h1>
+  <span class="tagline">We don't just detect potholes — we tell you which one to fix first.</span>
+  <div class="admin-area">
+    <div id="adminLoggedOut" style="display:flex;gap:6px;align-items:center;">
+      <input type="password" id="adminPasswordInput" placeholder="Admin password" />
+      <button id="adminLoginBtn" class="secondary admin-btn">🔒 Admin Login</button>
+    </div>
+    <div id="adminLoggedIn" style="display:none;gap:6px;align-items:center;">
+      <button id="clearAllBtn" class="admin-btn" style="background:var(--red);">🗑 Clear All Potholes</button>
+      <button id="adminLogoutBtn" class="secondary admin-btn">Logout</button>
+    </div>
+  </div>
+</header>
+
+<div id="toast"></div>
+
+<div class="layout">
+
+  <!-- LEFT: capture panel -->
+  <div class="panel">
+    <h2>Capture</h2>
+    <div id="cameraWrap">
+      <video id="video" autoplay playsinline muted></video>
+      <canvas id="snapshotCanvas"></canvas>
+      <div id="detectionBadge" class="detection-badge"></div>
+    </div>
+
+    <div class="btn-row">
+      <button id="startCamBtn">Start Camera</button>
+      <button id="captureBtn" disabled>📸 Capture &amp; Report</button>
+      <button id="uploadBtn" class="secondary">Upload Photo</button>
+      <input type="file" id="fileInput" accept="image/*" />
+    </div>
+    <div class="btn-row">
+      <button id="liveModeBtn" class="secondary" disabled>▶ Live Scan: Off</button>
+    </div>
+
+    <div class="loc-row">
+      📍 <span id="locStatus">Requesting location…</span>
+      <button id="demoLocBtn" class="secondary" style="padding:4px 8px;font-size:11px;">Use Demo Location</button>
+      <button id="pinLocBtn" class="secondary" style="padding:4px 8px;font-size:11px;">Click Map to Set Pin</button>
+    </div>
+    <div class="hint">Indoors / no GPS? Use a demo location or click the map, then capture a printed/demo photo.</div>
+
+    <div class="status-line" id="statusLine"></div>
+    <div id="resultCard" style="display:none;" class="result-card"></div>
+  </div>
+
+  <!-- RIGHT: map + priority list -->
+  <div>
+    <div class="panel">
+      <h2>Plan a Route (India)</h2>
+      <div class="btn-row" style="margin-top:0;">
+        <div style="position:relative;flex:1;min-width:160px;">
+          <input type="text" id="destInput" placeholder="Destination, e.g. India Gate, Delhi" style="width:100%;" autocomplete="off" />
+          <div id="destSuggestions" class="suggestions-dropdown"></div>
+        </div>
+        <button id="routeSearchBtn">🧭 Route</button>
+        <button id="clearRouteBtn" class="secondary">Clear</button>
+      </div>
+      <div class="status-line" id="routeStatus"></div>
+      <div id="routeSummary" style="display:none;" class="result-card"></div>
+      <div class="btn-row" id="navBtnRow" style="display:none;">
+        <button id="navStartBtn">▶ Start Navigation</button>
+        <button id="navStopBtn" class="secondary" style="display:none;">⏹ Stop Navigation</button>
+      </div>
+      <div id="routeHazardList"></div>
+    </div>
+
+    <div class="panel" style="margin-top:16px;">
+      <h2>Live Hazard Map</h2>
+      <div id="map"></div>
+    </div>
+
+    <div class="panel" style="margin-top:16px;">
+      <h2>Priority Fix List — Top 5</h2>
+      <table id="priorityTable">
+        <thead>
+          <tr><th>#</th><th>Type</th><th>Cluster</th><th>Severity</th><th>Tier</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <div class="row-hint">Click a row to locate it on the map ↑</div>
+    </div>
+  </div>
+
+</div>
+
+<div id="modalBackdrop" class="modal-backdrop">
+  <div class="modal-content">
+    <button id="modalCloseBtn" class="modal-close" aria-label="Close">✕</button>
+    <div id="modalHeadline" class="modal-headline"></div>
+    <canvas id="modalCanvas" class="modal-canvas"></canvas>
+    <div id="modalDetails" class="modal-details"></div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script>
+const API = ""; // same-origin (FastAPI serves this file too)
+
+// ---------- state ----------
+let stream = null;
+let currentLat = null, currentLng = null;
+let pinMode = false;
+let liveMode = false;
+let liveTimer = null;
+
+// ---------- elements ----------
+const video = document.getElementById("video");
+const snapshotCanvas = document.getElementById("snapshotCanvas");
+const cameraWrap = document.getElementById("cameraWrap");
+const detectionBadge = document.getElementById("detectionBadge");
+const startCamBtn = document.getElementById("startCamBtn");
+const captureBtn = document.getElementById("captureBtn");
+const uploadBtn = document.getElementById("uploadBtn");
+const fileInput = document.getElementById("fileInput");
+const liveModeBtn = document.getElementById("liveModeBtn");
+const locStatus = document.getElementById("locStatus");
+const demoLocBtn = document.getElementById("demoLocBtn");
+const pinLocBtn = document.getElementById("pinLocBtn");
+const statusLine = document.getElementById("statusLine");
+const resultCard = document.getElementById("resultCard");
+const toast = document.getElementById("toast");
+const modalBackdrop = document.getElementById("modalBackdrop");
+const modalCloseBtn = document.getElementById("modalCloseBtn");
+const modalHeadline = document.getElementById("modalHeadline");
+const modalCanvas = document.getElementById("modalCanvas");
+const modalDetails = document.getElementById("modalDetails");
+const destInput = document.getElementById("destInput");
+const destSuggestions = document.getElementById("destSuggestions");
+const routeSearchBtn = document.getElementById("routeSearchBtn");
+const clearRouteBtn = document.getElementById("clearRouteBtn");
+const routeStatus = document.getElementById("routeStatus");
+const routeSummary = document.getElementById("routeSummary");
+const routeHazardList = document.getElementById("routeHazardList");
+const navBtnRow = document.getElementById("navBtnRow");
+const navStartBtn = document.getElementById("navStartBtn");
+const navStopBtn = document.getElementById("navStopBtn");
+const adminLoggedOut = document.getElementById("adminLoggedOut");
+const adminLoggedIn = document.getElementById("adminLoggedIn");
+const adminPasswordInput = document.getElementById("adminPasswordInput");
+const adminLoginBtn = document.getElementById("adminLoginBtn");
+const adminLogoutBtn = document.getElementById("adminLogoutBtn");
+const clearAllBtn = document.getElementById("clearAllBtn");
+
+// ---------- map ---------- (defaults to Connaught Place, New Delhi)
+const map = L.map("map").setView([28.6315, 77.2167], 12);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  attribution: "&copy; OpenStreetMap contributors",
+  maxZoom: 19,
+}).addTo(map);
+
+let reportMarkers = [];
+let pinMarker = null;
+let highlightMarker = null;
+let latestPriorityList = [];
+let latestReports = [];
+
+// ---------- admin ----------
+// Token lives in sessionStorage (survives a page reload in the same tab,
+// gone when the tab closes) rather than localStorage, so an admin session
+// doesn't quietly persist forever on a shared/demo machine.
+let adminToken = sessionStorage.getItem("adminToken") || null;
+
+function updateAdminUI() {
+  const loggedIn = !!adminToken;
+  adminLoggedOut.style.display = loggedIn ? "none" : "flex";
+  adminLoggedIn.style.display = loggedIn ? "flex" : "none";
+  renderReports(latestReports); // re-render pins so popups pick up/drop the delete button
+}
+
+adminLoginBtn.onclick = async () => {
+  const password = adminPasswordInput.value;
+  if (!password) return;
+  try {
+    const form = new FormData();
+    form.append("password", password);
+    const res = await fetch(`${API}/admin/login`, { method: "POST", body: form });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { showToast(`⚠️ ${data.detail || "Login failed"}`); return; }
+    adminToken = data.token;
+    sessionStorage.setItem("adminToken", adminToken);
+    adminPasswordInput.value = "";
+    updateAdminUI();
+    showToast("🔓 Admin mode on");
+  } catch (e) {
+    showToast("⚠️ Network error logging in");
+  }
+};
+adminPasswordInput.addEventListener("keydown", (e) => { if (e.key === "Enter") adminLoginBtn.click(); });
+
+adminLogoutBtn.onclick = async () => {
+  try {
+    await fetch(`${API}/admin/logout`, { method: "POST", headers: { Authorization: `Bearer ${adminToken}` } });
+  } catch (e) { /* log out client-side regardless */ }
+  adminToken = null;
+  sessionStorage.removeItem("adminToken");
+  updateAdminUI();
+};
+
+clearAllBtn.onclick = async () => {
+  if (!adminToken) return;
+  if (!confirm("Remove ALL reported potholes from the map? This can't be undone.")) return;
+  try {
+    const res = await fetch(`${API}/admin/reports`, { method: "DELETE", headers: { Authorization: `Bearer ${adminToken}` } });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      showToast(`⚠️ ${data.detail || "Failed to clear reports"}`);
+      if (res.status === 401) { adminToken = null; sessionStorage.removeItem("adminToken"); updateAdminUI(); }
+      return;
+    }
+    showToast(`🗑 Cleared ${data.deleted} report(s)`);
+    knownHotspotKeys = new Set();
+    refreshData();
+  } catch (e) {
+    showToast("⚠️ Network error clearing reports");
+  }
+};
+
+async function deleteSingleReport(id) {
+  if (!adminToken) return;
+  if (!confirm("Remove this pothole report?")) return;
+  try {
+    const res = await fetch(`${API}/admin/reports/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${adminToken}` } });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { showToast(`⚠️ ${data.detail || "Failed to delete"}`); return; }
+    showToast("🗑 Report removed");
+    refreshData();
+  } catch (e) {
+    showToast("⚠️ Network error deleting report");
+  }
+}
+
+function tierColor(tier) {
+  if (tier === "low") return "#35c76e";
+  if (tier === "medium") return "#f2c94c";
+  return "#eb5757";
+}
+
+function haversineM(lat1, lng1, lat2, lng2) {
+  const R = 6371000;
+  const toRad = d => (d * Math.PI) / 180;
+  const dphi = toRad(lat2 - lat1);
+  const dlambda = toRad(lng2 - lng1);
+  const a = Math.sin(dphi / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dlambda / 2) ** 2;
+  return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function potholeIcon(tier, potholeCount, sizePx) {
+  const color = tierColor(tier);
+  const badge = potholeCount > 1 ? `<div class="pothole-pin-badge">${potholeCount}</div>` : "";
+  const html = `
+    <div class="pothole-pin" style="width:${sizePx}px;height:${sizePx}px;background:${color};">
+      <span class="pothole-pin-mark" style="font-size:${Math.round(sizePx * 0.5)}px;">!</span>
+      ${badge}
+    </div>`;
+  // anchor near the pin's tip (bottom point of the teardrop), not its center
+  return L.divIcon({ html, className: "", iconSize: [sizePx, sizePx], iconAnchor: [sizePx / 2, sizePx] });
+}
+
+function renderReports(reports) {
+  latestReports = reports;
+  reportMarkers.forEach(m => map.removeLayer(m));
+  reportMarkers = [];
+  reports.forEach(r => {
+    const potholeCount = r.pothole_count || 1;
+    // Pin grows both with how many other reports are nearby (history) and
+    // how many potholes were found in this single photo (in-frame) — a
+    // photo showing 5 potholes at once should visibly look worse.
+    const sizePx = 26 + Math.min(r.nearby_report_count, 5) * 2 + Math.min(potholeCount - 1, 4) * 3;
+    const marker = L.marker([r.lat, r.lng], {
+      icon: potholeIcon(r.severity_tier, potholeCount, sizePx),
+    }).addTo(map);
+    marker.bindPopup(
+      `<b>${r.type}</b>${potholeCount > 1 ? ` (${potholeCount} in this photo)` : ""}<br>` +
+      `Severity: ${r.severity_score.toFixed(2)} (${r.severity_tier})` +
+      `<br>Confidence: ${(r.confidence*100).toFixed(0)}%` +
+      `<br>Nearby reports: ${r.nearby_report_count}` +
+      (r.is_hotspot ? `<br><b style="color:#eb5757">🔥 Hotspot</b>` : ``) +
+      `<br><span style="color:#8b93a7;font-size:11px">${new Date(r.timestamp*1000).toLocaleString()}</span>` +
+      (adminToken ? `<br><button class="admin-delete-btn" style="margin-top:6px;padding:4px 8px;font-size:11px;background:var(--red);border:none;border-radius:6px;color:#fff;cursor:pointer;">🗑 Remove this report</button>` : "")
+    );
+    if (adminToken) {
+      marker.on("popupopen", (e) => {
+        const btn = e.popup.getElement()?.querySelector(".admin-delete-btn");
+        if (btn) btn.onclick = () => deleteSingleReport(r.id);
+      });
+    }
+    reportMarkers.push(marker);
+  });
+  if (currentRoute) computeRouteHazards();
+}
+
+function renderPriorityList(list) {
+  latestPriorityList = list;
+  const tbody = document.querySelector("#priorityTable tbody");
+  tbody.innerHTML = "";
+  list.forEach((c, i) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${i + 1}</td>
+      <td>${c.type}${c.is_hotspot ? " 🔥" : ""}</td>
+      <td>${c.cluster_size}</td>
+      <td>${c.combined_severity.toFixed(2)}</td>
+      <td><span class="tier-dot tier-${c.tier}"></span>${c.tier}</td>
+    `;
+    tr.onclick = () => locateCluster(c, tr);
+    tbody.appendChild(tr);
+  });
+}
+
+function locateCluster(c, rowEl) {
+  document.querySelectorAll("#priorityTable tbody tr").forEach(r => r.classList.remove("active-row"));
+  if (rowEl) rowEl.classList.add("active-row");
+
+  if (highlightMarker) map.removeLayer(highlightMarker);
+  highlightMarker = L.circleMarker([c.lat, c.lng], {
+    radius: 20,
+    color: tierColor(c.tier),
+    weight: 4,
+    fillOpacity: 0.15,
+    dashArray: "6 4",
+  }).addTo(map);
+
+  highlightMarker
+    .bindPopup(
+      `<b>${c.type}${c.is_hotspot ? " 🔥" : ""}</b><br>` +
+      `Cluster of ${c.cluster_size} report(s)<br>` +
+      `Combined severity: ${c.combined_severity.toFixed(2)} (${c.tier})` +
+      (c.is_hotspot ? `<br><b style="color:#eb5757">Hotspot</b>` : "")
+    )
+    .openPopup();
+
+  map.flyTo([c.lat, c.lng], Math.max(map.getZoom(), 16), { duration: 0.6 });
+}
+
+let knownHotspotKeys = new Set();
+function checkForNewHotspots(list) {
+  list.filter(c => c.is_hotspot).forEach(c => {
+    const key = `${c.type}:${c.lat.toFixed(3)}:${c.lng.toFixed(3)}`;
+    if (!knownHotspotKeys.has(key)) {
+      knownHotspotKeys.add(key);
+      showToast(`🔥 New hotspot: ${c.cluster_size} ${c.type} reports clustered nearby`);
+    }
+  });
+}
+
+function showToast(msg) {
+  toast.textContent = msg;
+  toast.classList.add("show");
+  setTimeout(() => toast.classList.remove("show"), 4500);
+}
+
+async function refreshData() {
+  try {
+    const [reportsRes, priRes] = await Promise.all([
+      fetch(`${API}/reports`).then(r => r.json()),
+      fetch(`${API}/priority-list`).then(r => r.json()),
+    ]);
+    renderReports(reportsRes.reports);
+    renderPriorityList(priRes.priority_list);
+    checkForNewHotspots(priRes.priority_list);
+  } catch (e) {
+    console.error("refresh failed", e);
+  }
+}
+refreshData();
+setInterval(refreshData, 4000);
+adminLoggedOut.style.display = adminToken ? "none" : "flex";
+adminLoggedIn.style.display = adminToken ? "flex" : "none";
+
+// ---------- geolocation ----------
+function setLocation(lat, lng, label) {
+  currentLat = lat;
+  currentLng = lng;
+  locStatus.textContent = `${label}: ${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+  if (pinMarker) map.removeLayer(pinMarker);
+  pinMarker = L.marker([lat, lng], { opacity: 0.6 }).addTo(map).bindPopup("Next report will use this location");
+  map.setView([lat, lng], 15);
+}
+
+if (navigator.geolocation) {
+  navigator.geolocation.getCurrentPosition(
+    pos => setLocation(pos.coords.latitude, pos.coords.longitude, "GPS"),
+    err => {
+      locStatus.textContent = "GPS unavailable — using demo location";
+      fetch(`${API}/demo-location`).then(r => r.json()).then(d => setLocation(d.lat, d.lng, "Demo"));
+    },
+    { timeout: 5000 }
+  );
+} else {
+  fetch(`${API}/demo-location`).then(r => r.json()).then(d => setLocation(d.lat, d.lng, "Demo"));
+}
+
+demoLocBtn.onclick = () => {
+  fetch(`${API}/demo-location`).then(r => r.json()).then(d => {
+    // small jitter so repeated indoor demo shots don't stack exactly on one point
+    const jitter = () => (Math.random() - 0.5) * 0.003;
+    setLocation(d.lat + jitter(), d.lng + jitter(), "Demo (jittered)");
+  });
+};
+
+pinLocBtn.onclick = () => {
+  pinMode = !pinMode;
+  pinLocBtn.textContent = pinMode ? "Click map now…" : "Click Map to Set Pin";
+};
+map.on("click", (e) => {
+  if (!pinMode) return;
+  setLocation(e.latlng.lat, e.latlng.lng, "Manual pin");
+  pinMode = false;
+  pinLocBtn.textContent = "Click Map to Set Pin";
+});
+
+// ---------- camera ----------
+startCamBtn.onclick = async () => {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "environment" },
+      audio: false,
+    });
+    video.srcObject = stream;
+    captureBtn.disabled = false;
+    liveModeBtn.disabled = false;
+    startCamBtn.textContent = "Camera Running";
+    startCamBtn.disabled = true;
+  } catch (e) {
+    statusLine.textContent = "Camera access denied or unavailable — use Upload Photo instead.";
+  }
+};
+
+uploadBtn.onclick = () => fileInput.click();
+fileInput.onchange = () => {
+  const f = fileInput.files[0];
+  if (!f) return;
+  if (!f.type.startsWith("image/")) {
+    statusLine.textContent = `"${f.name}" is a ${f.type || "non-image"} file — please upload a photo (JPG/PNG), not a video.`;
+    showDetectionBadge(false, "⚠️ Please upload an image, not a video");
+    fileInput.value = "";
+    return;
+  }
+  sendReport(f);
+  fileInput.value = ""; // allow re-selecting the same file later
+};
+
+captureBtn.onclick = () => captureAndSend();
+
+liveModeBtn.onclick = () => {
+  liveMode = !liveMode;
+  liveModeBtn.textContent = liveMode ? "⏸ Live Scan: On" : "▶ Live Scan: Off";
+  if (liveMode) {
+    liveTimer = setInterval(captureAndSend, 3000);
+  } else {
+    clearInterval(liveTimer);
+  }
+};
+
+function captureAndSend() {
+  const w = video.videoWidth, h = video.videoHeight;
+  if (!w || !h) return;
+  snapshotCanvas.width = w;
+  snapshotCanvas.height = h;
+  const ctx = snapshotCanvas.getContext("2d");
+  ctx.drawImage(video, 0, 0, w, h);
+  snapshotCanvas.toBlob(blob => sendReport(blob), "image/jpeg", 0.9);
+}
+
+function showDetectionBadge(success, text) {
+  detectionBadge.className = "detection-badge " + (success ? "success" : "fail");
+  detectionBadge.textContent = text;
+  detectionBadge.style.display = "flex";
+
+  cameraWrap.classList.remove("flash-success", "flash-fail");
+  void cameraWrap.offsetWidth; // force reflow so the animation restarts on repeat detections
+  cameraWrap.classList.add(success ? "flash-success" : "flash-fail");
+
+  clearTimeout(showDetectionBadge._t);
+  showDetectionBadge._t = setTimeout(() => {
+    detectionBadge.style.display = "none";
+    cameraWrap.classList.remove("flash-success", "flash-fail");
+  }, 3200);
+}
+
+async function sendReport(fileOrBlob) {
+  if (currentLat === null) {
+    statusLine.textContent = "No location set yet — wait for GPS or pick a demo location.";
+    return;
+  }
+  statusLine.textContent = "Analyzing frame…";
+  resultCard.style.display = "none";
+
+  const form = new FormData();
+  form.append("image", fileOrBlob, "frame.jpg");
+  form.append("lat", currentLat);
+  form.append("lng", currentLng);
+
+  try {
+    const res = await fetch(`${API}/report`, { method: "POST", body: form });
+
+    if (!res.ok) {
+      let detail = `Request failed (HTTP ${res.status})`;
+      try {
+        const errBody = await res.json();
+        if (errBody.detail) detail = errBody.detail;
+      } catch (_) { /* body wasn't JSON, keep default message */ }
+      statusLine.textContent = detail;
+      showDetectionBadge(false, `⚠️ ${detail}`);
+      return;
+    }
+
+    const data = await res.json();
+
+    if (!data.detected) {
+      statusLine.textContent = `No hazard detected (${data.inference_ms}ms). Try a clearer/closer shot.`;
+      showDetectionBadge(false, "❌ No pothole detected");
+      resultCard.style.display = "block";
+      resultCard.className = "result-card fail";
+      resultCard.innerHTML = `No pothole found in this frame. Try moving closer, improving lighting, or a more direct angle.`;
+      openResultModal(fileOrBlob, data);
+      return;
+    }
+
+    const count = data.pothole_count || 1;
+    const countLabel = count > 1 ? `${count} potholes detected` : "Pothole detected";
+    statusLine.textContent = `Detected in ${data.inference_ms}ms.`;
+    showDetectionBadge(true, `✅ ${countLabel} (top ${(data.confidence*100).toFixed(0)}%)`);
+    openResultModal(fileOrBlob, data);
+
+    resultCard.style.display = "block";
+    resultCard.className = "result-card success";
+    resultCard.innerHTML = `
+      <span class="headline"><span class="tier-dot tier-${data.severity_tier}"></span>${countLabel} — top confidence ${(data.confidence*100).toFixed(0)}%</span>
+      Severity score: <b>${data.severity_score.toFixed(2)}</b> (${data.severity_tier})${count > 1 ? ` <span style="color:var(--muted)">(boosted for ${count} potholes in one photo)</span>` : ""}<br>
+      Nearby reports (same type, ${50}m/${6}h): ${data.nearby_report_count}<br>
+      ${data.is_hotspot ? `<b style="color:#eb5757">🔥 This just formed/confirmed a hotspot</b>` : ""}
+    `;
+
+    if (data.is_hotspot) showToast(`🔥 Hotspot confirmed at this location (${data.nearby_report_count + 1} reports)`);
+
+    refreshData();
+  } catch (e) {
+    statusLine.textContent = "Network error contacting backend — check the server is running and reachable.";
+    showDetectionBadge(false, "⚠️ Network error");
+    console.error(e);
+  }
+}
+
+// ---------- result popup (shows the captured photo with the model's markings) ----------
+function drawBBoxOnCanvas(ctx, w, h, bboxFrac, labelText, color) {
+  const [x1, y1, x2, y2] = bboxFrac;
+  const bx = x1 * w, by = y1 * h;
+  const bw = (x2 - x1) * w, bh = (y2 - y1) * h;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = Math.max(3, w * 0.006);
+  ctx.strokeRect(bx, by, bw, bh);
+
+  ctx.font = `bold ${Math.max(16, w * 0.026)}px sans-serif`;
+  const textW = ctx.measureText(labelText).width;
+  const boxH = Math.max(24, w * 0.038);
+  const labelY = Math.max(0, by - boxH);
+  ctx.fillStyle = color;
+  ctx.fillRect(bx, labelY, textW + 14, boxH);
+  ctx.fillStyle = "#06210f";
+  ctx.fillText(labelText, bx + 7, labelY + Math.max(18, w * 0.027));
+}
+
+function openResultModal(fileOrBlob, data) {
+  const img = new Image();
+  img.onload = () => {
+    modalCanvas.style.display = "block";
+    modalCanvas.width = img.width;
+    modalCanvas.height = img.height;
+    const ctx = modalCanvas.getContext("2d");
+    ctx.drawImage(img, 0, 0);
+    if (data.detected && data.detections && data.detections.length) {
+      const color = tierColor(data.severity_tier || "high");
+      data.detections.forEach((d, i) => {
+        const label = data.detections.length > 1
+          ? `✅ #${i + 1} pothole ${(d.confidence * 100).toFixed(0)}%`
+          : `✅ pothole ${(d.confidence * 100).toFixed(0)}%`;
+        drawBBoxOnCanvas(ctx, img.width, img.height, d.bbox_frac, label, color);
+      });
+    } else if (data.detected && data.bbox_frac) {
+      // fallback for older response shape
+      drawBBoxOnCanvas(ctx, img.width, img.height, data.bbox_frac, `✅ pothole ${(data.confidence * 100).toFixed(0)}%`, tierColor(data.severity_tier));
+    }
+  };
+  img.onerror = () => {
+    // Browsers can't decode every format a phone might upload (e.g. HEIC) —
+    // the backend already handled the detection fine, we just can't preview
+    // this particular file client-side. Say so instead of showing a blank canvas.
+    modalCanvas.style.display = "none";
+    modalDetails.innerHTML =
+      `<span style="color:var(--muted)">(Preview unavailable — your browser couldn't render this image format, ` +
+      `but the report above was still processed and saved.)</span><br>` + modalDetails.innerHTML;
+  };
+  img.src = URL.createObjectURL(fileOrBlob);
+
+  if (data.detected) {
+    const count = data.pothole_count || 1;
+    const countLabel = count > 1 ? `${count} potholes detected` : "Pothole detected";
+    modalHeadline.className = "modal-headline success";
+    modalHeadline.textContent = `✅ ${countLabel} — top confidence ${(data.confidence * 100).toFixed(0)}%`;
+    modalDetails.innerHTML = `
+      <span class="tier-dot tier-${data.severity_tier}"></span>Severity: <b>${data.severity_score.toFixed(2)}</b> (${data.severity_tier})${count > 1 ? ` <span style="color:var(--muted)">(boosted for ${count} potholes in one photo)</span>` : ""}<br>
+      Nearby reports (50m / 6h window): ${data.nearby_report_count}<br>
+      ${data.is_hotspot ? `<b style="color:#eb5757">🔥 Hotspot confirmed at this location</b>` : "Reported and added to the map."}
+    `;
+  } else {
+    modalHeadline.className = "modal-headline fail";
+    modalHeadline.textContent = "❌ No pothole detected";
+    modalDetails.innerHTML = `No pothole was found in this frame. Try moving closer, improving lighting, or a more direct angle, then capture again.`;
+  }
+
+  modalBackdrop.classList.add("show");
+}
+
+function closeResultModal() {
+  modalBackdrop.classList.remove("show");
+}
+
+modalCloseBtn.onclick = closeResultModal;
+modalBackdrop.onclick = (e) => { if (e.target === modalBackdrop) closeResultModal(); };
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeResultModal(); });
+
+// ---------- route planner (India) ----------
+// Uses two free, no-API-key services (same "no key needed" story as the
+// OpenStreetMap tiles above): Nominatim for turning a typed place name into
+// coordinates, and OSRM's public routing server for the actual road route.
+// Both are OSM-backed public demo servers meant for light/demo use, not
+// high-traffic production — fine here, but a real deployment should
+// self-host both or move to a paid provider.
+const ROUTE_HAZARD_BUFFER_M = 30; // how close a report has to be to the route to count as "on the way"
+let currentRoute = null;   // { latlngs, distanceKm, durationMin }
+let routeLine = null;
+let routeHazardIds = new Set();
+let routeHazardRings = [];
+
+// ---------- destination autocomplete ("jan" -> "Jantar Mantar, Delhi" etc.) ----------
+// Debounced so we're not firing a request on every keystroke — Nominatim's
+// usage policy asks for at most ~1 request/sec from a client. AbortController
+// cancels an in-flight request when the user keeps typing, so a slow response
+// to an old query can't overwrite a newer one (fixes flicker/wrong-order results).
+let suggestDebounceTimer = null;
+let suggestAbortController = null;
+let selectedDestination = null; // { lat, lng, displayName } once user picks a suggestion
+
+function hideSuggestions() {
+  destSuggestions.style.display = "none";
+  destSuggestions.innerHTML = "";
+}
+
+async function fetchSuggestions(query) {
+  if (suggestAbortController) suggestAbortController.abort();
+  suggestAbortController = new AbortController();
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?format=json&countrycodes=in&limit=5&q=${encodeURIComponent(query)}`;
+    const res = await fetch(url, { headers: { "Accept-Language": "en" }, signal: suggestAbortController.signal });
+    if (!res.ok) { hideSuggestions(); return; }
+    const results = await res.json();
+    renderSuggestions(results);
+  } catch (e) {
+    if (e.name !== "AbortError") console.error("suggestion fetch failed", e);
+  }
+}
+
+function renderSuggestions(results) {
+  if (!results.length) { hideSuggestions(); return; }
+  destSuggestions.innerHTML = results.map((r, i) => `<div class="suggestion-item" data-idx="${i}">${r.display_name}</div>`).join("");
+  destSuggestions.style.display = "block";
+  destSuggestions.querySelectorAll(".suggestion-item").forEach((el, i) => {
+    el.onclick = () => {
+      const r = results[i];
+      destInput.value = r.display_name;
+      selectedDestination = { lat: parseFloat(r.lat), lng: parseFloat(r.lon), displayName: r.display_name };
+      hideSuggestions();
+    };
+  });
+}
+
+destInput.addEventListener("input", () => {
+  selectedDestination = null; // typing invalidates whatever was previously picked
+  const q = destInput.value.trim();
+  clearTimeout(suggestDebounceTimer);
+  if (q.length < 3) { hideSuggestions(); return; }
+  suggestDebounceTimer = setTimeout(() => fetchSuggestions(q), 350);
+});
+
+document.addEventListener("click", (e) => {
+  if (e.target !== destInput && !destSuggestions.contains(e.target)) hideSuggestions();
+});
+
+async function geocodeDestination(query) {
+  const url = `https://nominatim.openstreetmap.org/search?format=json&countrycodes=in&limit=1&q=${encodeURIComponent(query)}`;
+  const res = await fetch(url, { headers: { "Accept-Language": "en" } });
+  if (!res.ok) throw new Error(`Geocoding failed (HTTP ${res.status})`);
+  const results = await res.json();
+  if (!results.length) return null;
+  return { lat: parseFloat(results[0].lat), lng: parseFloat(results[0].lon), displayName: results[0].display_name };
+}
+
+async function fetchRoute(startLat, startLng, destLat, destLng) {
+  const url = `https://router.project-osrm.org/route/v1/driving/${startLng},${startLat};${destLng},${destLat}?overview=full&geometries=geojson`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Routing failed (HTTP ${res.status})`);
+  const data = await res.json();
+  if (data.code !== "Ok" || !data.routes || !data.routes.length) {
+    throw new Error(data.message || "No drivable route found between those points");
+  }
+  const route = data.routes[0];
+  const latlngs = route.geometry.coordinates.map(([lng, lat]) => [lat, lng]);
+  return { latlngs, distanceKm: route.distance / 1000, durationMin: route.duration / 60 };
+}
+
+function minDistanceToRouteM(lat, lng, routeLatLngs) {
+  let min = Infinity;
+  for (const [rlat, rlng] of routeLatLngs) {
+    const d = haversineM(lat, lng, rlat, rlng);
+    if (d < min) min = d;
+    if (min <= ROUTE_HAZARD_BUFFER_M) break; // early exit, close enough
+  }
+  return min;
+}
+
+function computeRouteHazards() {
+  routeHazardRings.forEach(r => map.removeLayer(r));
+  routeHazardRings = [];
+  routeHazardIds = new Set();
+  if (!currentRoute) return;
+
+  latestReports.forEach(r => {
+    if (minDistanceToRouteM(r.lat, r.lng, currentRoute.latlngs) <= ROUTE_HAZARD_BUFFER_M) {
+      routeHazardIds.add(r.id);
+      const ring = L.circleMarker([r.lat, r.lng], {
+        radius: 14,
+        color: "#ffb020",
+        weight: 3,
+        fillOpacity: 0,
+        dashArray: "4 3",
+      }).addTo(map);
+      routeHazardRings.push(ring);
+    }
+  });
+
+  renderRouteHazardList();
+}
+
+function renderRouteHazardList() {
+  if (!currentRoute) { routeHazardList.innerHTML = ""; return; }
+
+  const onRoute = latestReports
+    .filter(r => routeHazardIds.has(r.id))
+    .sort((a, b) => b.severity_score - a.severity_score);
+
+  if (!onRoute.length) {
+    routeHazardList.innerHTML = `<div class="route-hazard-item" style="border-left-color:var(--green)">✅ No reported potholes along this route yet.</div>`;
+    return;
+  }
+
+  routeHazardList.innerHTML = onRoute.map(r => `
+    <div class="route-hazard-item" style="border-left-color:${tierColor(r.severity_tier)}" data-id="${r.id}">
+      <span class="tier-dot tier-${r.severity_tier}"></span><b>${r.pothole_count > 1 ? r.pothole_count + " potholes" : "Pothole"}</b>
+      — severity ${r.severity_score.toFixed(2)} (${r.severity_tier})${r.is_hotspot ? " 🔥" : ""}
+    </div>
+  `).join("");
+
+  routeHazardList.querySelectorAll(".route-hazard-item[data-id]").forEach(el => {
+    el.onclick = () => {
+      const r = latestReports.find(x => x.id === parseInt(el.dataset.id, 10));
+      if (r) map.flyTo([r.lat, r.lng], 17, { duration: 0.5 });
+    };
+  });
+}
+
+async function planRoute() {
+  const dest = destInput.value.trim();
+  if (!dest) { routeStatus.textContent = "Enter a destination first."; return; }
+  if (currentLat === null) { routeStatus.textContent = "Set your starting location first (GPS, demo location, or map pin)."; return; }
+
+  hideSuggestions();
+  routeStatus.textContent = "Searching destination…";
+  routeSummary.style.display = "none";
+
+  try {
+    // If the user picked a suggestion and hasn't edited the text since, use
+    // those exact coordinates instead of re-geocoding — faster and avoids a
+    // second query landing on a different match for an ambiguous name.
+    const destLoc = (selectedDestination && selectedDestination.displayName === dest)
+      ? selectedDestination
+      : await geocodeDestination(`${dest}, India`);
+    if (!destLoc) {
+      routeStatus.textContent = `Couldn't find "${dest}" in India — try a more specific name (add city/area).`;
+      return;
+    }
+
+    routeStatus.textContent = "Fetching route…";
+    const route = await fetchRoute(currentLat, currentLng, destLoc.lat, destLoc.lng);
+    currentRoute = route;
+
+    if (routeLine) map.removeLayer(routeLine);
+    routeLine = L.polyline(route.latlngs, { color: "#4f8cff", weight: 5, opacity: 0.85 }).addTo(map);
+    map.fitBounds(routeLine.getBounds(), { padding: [40, 40] });
+
+    routeStatus.textContent = "";
+    routeSummary.style.display = "block";
+    routeSummary.className = "result-card success";
+    routeSummary.dataset.destLabel = destLoc.displayName.split(",")[0];
+    routeSummary.innerHTML = `
+      <span class="headline">🧭 Route to ${destLoc.displayName.split(",")[0]}</span>
+      ${route.distanceKm.toFixed(1)} km &middot; ~${Math.round(route.durationMin)} min
+    `;
+    navBtnRow.style.display = "flex";
+
+    computeRouteHazards();
+  } catch (e) {
+    routeStatus.textContent = `Route lookup failed: ${e.message || "check your connection and try again"}.`;
+    console.error(e);
+  }
+}
+
+function clearRoute() {
+  stopNavigation();
+  if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
+  routeHazardRings.forEach(r => map.removeLayer(r));
+  routeHazardRings = [];
+  routeHazardIds = new Set();
+  currentRoute = null;
+  routeStatus.textContent = "";
+  routeSummary.style.display = "none";
+  routeHazardList.innerHTML = "";
+  navBtnRow.style.display = "none";
+  destInput.value = "";
+  selectedDestination = null;
+}
+
+// ---------- live navigation ----------
+// A scoped version of turn-by-turn: continuously watches the browser's GPS
+// and moves a marker along the already-planned route, with live remaining
+// distance/time and a one-time alert as you approach each on-route hazard.
+// What this deliberately does NOT do (the parts that make Google Maps hard
+// to replicate): snap your raw GPS fix onto the actual road centerline, or
+// silently recalculate the route if you go off it. Both need a proper
+// map-matching/routing backend, not just a browser API.
+let navWatchId = null;
+let navMarker = null;
+let navigating = false;
+let alertedHazardIds = new Set();
+
+function nearestRouteIndex(lat, lng, routeLatLngs) {
+  let minD = Infinity, minI = 0;
+  for (let i = 0; i < routeLatLngs.length; i++) {
+    const [rlat, rlng] = routeLatLngs[i];
+    const d = haversineM(lat, lng, rlat, rlng);
+    if (d < minD) { minD = d; minI = i; }
+  }
+  return { index: minI, distanceToRoute: minD };
+}
+
+function remainingDistanceM(routeLatLngs, fromIndex) {
+  let total = 0;
+  for (let i = fromIndex; i < routeLatLngs.length - 1; i++) {
+    const [lat1, lng1] = routeLatLngs[i];
+    const [lat2, lng2] = routeLatLngs[i + 1];
+    total += haversineM(lat1, lng1, lat2, lng2);
+  }
+  return total;
+}
+
+function navIcon(headingDeg) {
+  // "▲" points up by default, which already matches heading 0 = north, so
+  // no offset is needed — just rotate by whatever heading the device reports.
+  const rot = Number.isFinite(headingDeg) ? headingDeg : 0;
+  const html = `
+    <div class="nav-marker-wrap">
+      <div class="nav-marker-pulse"></div>
+      <div class="nav-marker-dot"><span class="nav-marker-arrow" style="display:inline-block;transform:rotate(${rot}deg);">▲</span></div>
+    </div>`;
+  return L.divIcon({ html, className: "", iconSize: [36, 36], iconAnchor: [18, 18] });
+}
+
+function onNavPosition(pos) {
+  const lat = pos.coords.latitude, lng = pos.coords.longitude;
+  currentLat = lat;
+  currentLng = lng; // reports captured mid-drive use your live position
+
+  const icon = navIcon(pos.coords.heading);
+  if (!navMarker) {
+    navMarker = L.marker([lat, lng], { icon, zIndexOffset: 1000 }).addTo(map);
+  } else {
+    navMarker.setLatLng([lat, lng]);
+    navMarker.setIcon(icon);
+  }
+  map.panTo([lat, lng], { animate: true });
+
+  if (!currentRoute) return;
+  const { index, distanceToRoute } = nearestRouteIndex(lat, lng, currentRoute.latlngs);
+  const remKm = remainingDistanceM(currentRoute.latlngs, index) / 1000;
+  // Naive linear estimate (remaining distance / total distance * total time) —
+  // no live traffic data, same caveat as the rest of this being built on free
+  // public services rather than a paid routing SDK.
+  const proportion = currentRoute.distanceKm > 0 ? remKm / currentRoute.distanceKm : 0;
+  const remMin = Math.max(0, currentRoute.durationMin * proportion);
+  const destLabel = routeSummary.dataset.destLabel || "destination";
+
+  routeSummary.innerHTML = `
+    <span class="headline">🧭 Navigating to ${destLabel}</span>
+    ${remKm.toFixed(1)} km remaining &middot; ~${Math.round(remMin)} min
+    ${distanceToRoute > 60 ? `<br><span style="color:var(--yellow)">You're ~${Math.round(distanceToRoute)}m off the route (no auto-reroute yet).</span>` : ""}
+  `;
+
+  latestReports.forEach(r => {
+    if (!routeHazardIds.has(r.id) || alertedHazardIds.has(r.id)) return;
+    if (haversineM(lat, lng, r.lat, r.lng) <= 150) {
+      alertedHazardIds.add(r.id);
+      showToast(`⚠️ Pothole ahead (~${Math.round(haversineM(lat, lng, r.lat, r.lng))}m) — severity ${r.severity_score.toFixed(2)}`);
+    }
+  });
+}
+
+function onNavError(err) {
+  routeStatus.textContent = `Live location error: ${err.message}`;
+}
+
+function startNavigation() {
+  if (!currentRoute) { routeStatus.textContent = "Plan a route first."; return; }
+  if (!navigator.geolocation) { routeStatus.textContent = "Geolocation isn't available on this device/browser."; return; }
+  navigating = true;
+  alertedHazardIds = new Set();
+  if (pinMarker) { map.removeLayer(pinMarker); pinMarker = null; }
+  navStartBtn.style.display = "none";
+  navStopBtn.style.display = "inline-block";
+  navWatchId = navigator.geolocation.watchPosition(onNavPosition, onNavError, {
+    enableHighAccuracy: true,
+    maximumAge: 2000,
+    timeout: 10000,
+  });
+}
+
+function stopNavigation() {
+  navigating = false;
+  if (navWatchId !== null) navigator.geolocation.clearWatch(navWatchId);
+  navWatchId = null;
+  navStartBtn.style.display = "inline-block";
+  navStopBtn.style.display = "none";
+  if (navMarker) { map.removeLayer(navMarker); navMarker = null; }
+}
+
+navStartBtn.onclick = startNavigation;
+navStopBtn.onclick = stopNavigation;
+
+routeSearchBtn.onclick = planRoute;
+clearRouteBtn.onclick = clearRoute;
+destInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") planRoute();
+  if (e.key === "Escape") hideSuggestions();
+});
+</script>
+</body>
+</html>

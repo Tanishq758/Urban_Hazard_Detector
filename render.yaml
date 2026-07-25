@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: urban-hazard-detector
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: ADMIN_PASSWORD
+        sync: false   # set this in the Render dashboard after first deploy — never commit it here
